@@ -61,6 +61,21 @@ dependencies {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
         exclude(group = "org.slf4j")
     }
+    implementation(libs.ktor.server.sse) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+        exclude(group = "org.slf4j")
+    }
+    implementation(libs.ktor.server.content.negotiation) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+        exclude(group = "org.slf4j")
+    }
+    implementation(libs.ktor.serialization.kotlinx.json) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+        exclude(group = "org.slf4j")
+    }
 
     // Testing
     testImplementation(libs.junit)
@@ -146,8 +161,6 @@ intellijPlatform {
     pluginVerification {
         ides {
             recommended()
-            // Keep the explicitly supported compatibility range under verifier coverage.
-            create("IU", "2025.3")
             // CI must use a published IDE release version, not a raw build number.
             // 2026.1 resolves correctly in JetBrains repositories and still keeps 261 as the baseline.
             create("IU", "2026.1")
