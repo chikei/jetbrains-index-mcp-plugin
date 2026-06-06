@@ -34,38 +34,3 @@ sealed class ContentBlock {
         val mimeType: String
     ) : ContentBlock()
 }
-
-@Serializable
-data class ServerInfo(
-    val name: String,
-    val version: String,
-    val description: String? = null
-)
-
-@Serializable
-data class ServerCapabilities(
-    val tools: ToolCapability? = ToolCapability()
-)
-
-@Serializable
-data class ToolCapability(
-    val listChanged: Boolean = false
-)
-
-@Serializable
-data class InitializeResult(
-    val protocolVersion: String = "2025-03-26",
-    val capabilities: ServerCapabilities = ServerCapabilities(),
-    val serverInfo: ServerInfo
-)
-
-@Serializable
-data class ToolsListResult(
-    val tools: List<ToolDefinition>
-)
-
-@Serializable
-data class ToolCallParams(
-    val name: String,
-    val arguments: JsonObject? = null
-)

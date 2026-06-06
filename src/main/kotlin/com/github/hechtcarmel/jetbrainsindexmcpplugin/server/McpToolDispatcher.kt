@@ -21,7 +21,15 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-class McpToolDispatcher {
+class McpToolDispatcher(
+    private val recordHistory: (Project, CommandEntry) -> Unit = { project, entry ->
+        CommandHistoryService.getInstance(project).recordCommand(entry)
+    },
+    private val updateHistory: (Project, CommandEntry, CommandStatus, String?, Long) -> Unit =
+        { project, entry, status, result, duration ->
+            CommandHistoryService.getInstance(project).updateCommandStatus(entry.id, status, result, duration)
+        },
+) {
 
     companion object {
         private val LOG = logger<McpToolDispatcher>()
@@ -91,7 +99,7 @@ class McpToolDispatcher {
 
     private fun recordHistorySafely(project: Project, commandEntry: CommandEntry) {
         try {
-            CommandHistoryService.getInstance(project).recordCommand(commandEntry)
+            recordHistory(project, commandEntry)
         } catch (e: Exception) {
             LOG.warn("Failed to record command history for ${commandEntry.toolName}", e)
         }
@@ -105,7 +113,7 @@ class McpToolDispatcher {
         duration: Long
     ) {
         try {
-            CommandHistoryService.getInstance(project).updateCommandStatus(commandEntry.id, status, result, duration)
+            updateHistory(project, commandEntry, status, result, duration)
         } catch (e: Exception) {
             LOG.warn("Failed to update command history for ${commandEntry.toolName}", e)
         }

@@ -1,129 +1,44 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.integration
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.JsonRpcHandler
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.JsonRpcRequest
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.JsonRpcResponse
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.McpToolDispatcher
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.ToolRegistry
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
- * Integration tests for the MCP server endpoints.
- * Tests full server functionality including tools/list and tools/call.
+ * Integration tests for tool registration and dispatch.
+ *
+ * Protocol-level behavior (initialize, ping, tools/list routing, JSON-RPC error codes) is now
+ * owned by the MCP SDK and is exercised over the wire in `KtorMcpServerUnitTest`. These tests
+ * cover the IDE-specific pieces: which tools the registry advertises, and dispatching a real
+ * tool call through [McpToolDispatcher].
  */
 class McpServerIntegrationTest : BasePlatformTestCase() {
 
-    private lateinit var handler: JsonRpcHandler
+    private lateinit var dispatcher: McpToolDispatcher
     private lateinit var toolRegistry: ToolRegistry
-
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
 
     override fun setUp() {
         super.setUp()
         toolRegistry = ToolRegistry()
         toolRegistry.registerBuiltInTools()
-        handler = JsonRpcHandler(toolRegistry)
+        dispatcher = McpToolDispatcher()
     }
 
-    // Server Initialization Tests
+    private fun registeredToolNames(): List<String> = toolRegistry.getToolDefinitions().map { it.name }
 
-    fun testInitializeEndpoint() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(1),
-            method = "initialize",
-            params = buildJsonObject { }
-        )
+    // Tool registration tests
 
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNull("Initialize should not return error", response.error)
-        assertNotNull("Initialize should return result", response.result)
-
-        val result = response.result!!.jsonObject
-        assertNotNull("Result should have serverInfo", result["serverInfo"])
-        assertNotNull("Result should have capabilities", result["capabilities"])
-
-        val serverInfo = result["serverInfo"]!!.jsonObject
-        assertEquals("jetbrains-index-mcp", serverInfo["name"]?.jsonPrimitive?.content)
-        assertNotNull("serverInfo should contain description", serverInfo["description"])
-        assertTrue(
-            "description should mention refactoring",
-            serverInfo["description"]?.jsonPrimitive?.content?.contains("refactoring") == true
-        )
-    }
-
-    fun testInitializedEndpoint() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(2),
-            method = "notifications/initialized",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-
-        assertNull("notifications/initialized should not have response", responseJson)
-    }
-
-    fun testPingEndpoint() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(3),
-            method = "ping",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNull("Ping should not return error", response.error)
-        assertNotNull("Ping should return result", response.result)
-    }
-
-    // Tools List Tests
-
-    fun testToolsListEndpoint() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(10),
-            method = "tools/list",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNull("tools/list should not return error", response.error)
-        assertNotNull("tools/list should return result", response.result)
-
-        val result = response.result!!.jsonObject
-        val tools = result["tools"]?.jsonArray
-        assertNotNull("Result should have tools array", tools)
+    fun testRegistryAdvertisesTools() {
         val toolsCount = 11
-        assertTrue("Should have at least $toolsCount tools", tools!!.size >= toolsCount)
+        assertTrue("Should have at least $toolsCount tools", registeredToolNames().size >= toolsCount)
     }
 
-    fun testToolsListContainsNavigationTools() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(11),
-            method = "tools/list",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        val tools = response.result!!.jsonObject["tools"]?.jsonArray
-        val toolNames = tools?.map { it.jsonObject["name"]?.jsonPrimitive?.content }
+    fun testRegistryContainsNavigationTools() {
+        val toolNames = registeredToolNames()
 
         // Note: ide_find_symbol and ide_file_structure are disabled by default, so not included here
         val expectedNavigationTools = listOf(
@@ -139,127 +54,36 @@ class McpServerIntegrationTest : BasePlatformTestCase() {
         )
 
         expectedNavigationTools.forEach { toolName ->
-            assertTrue("Should contain $toolName tool", toolNames?.contains(toolName) == true)
+            assertTrue("Should contain $toolName tool", toolNames.contains(toolName))
         }
     }
 
-    fun testToolsListContainsIntelligenceTools() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(12),
-            method = "tools/list",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        val tools = response.result!!.jsonObject["tools"]?.jsonArray
-        val toolNames = tools?.map { it.jsonObject["name"]?.jsonPrimitive?.content }
-
-        val expectedIntelligenceTools = listOf(
-            ToolNames.DIAGNOSTICS
-        )
-
-        expectedIntelligenceTools.forEach { toolName ->
-            assertTrue("Should contain $toolName tool", toolNames?.contains(toolName) == true)
-        }
+    fun testRegistryContainsIntelligenceTools() {
+        assertTrue("Should contain ${ToolNames.DIAGNOSTICS} tool", registeredToolNames().contains(ToolNames.DIAGNOSTICS))
     }
 
-    fun testToolsListContainsProjectTools() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(13),
-            method = "tools/list",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        val tools = response.result!!.jsonObject["tools"]?.jsonArray
-        val toolNames = tools?.map { it.jsonObject["name"]?.jsonPrimitive?.content }
-
-        val expectedProjectTools = listOf(
-            ToolNames.INDEX_STATUS
-        )
-
-        expectedProjectTools.forEach { toolName ->
-            assertTrue("Should contain $toolName tool", toolNames?.contains(toolName) == true)
-        }
+    fun testRegistryContainsProjectTools() {
+        assertTrue("Should contain ${ToolNames.INDEX_STATUS} tool", registeredToolNames().contains(ToolNames.INDEX_STATUS))
     }
 
-    // Tools Call Tests
+    // Tool dispatch tests
 
-    fun testToolsCallGetIndexStatus() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(20),
-            method = "tools/call",
-            params = buildJsonObject {
-                put("name", ToolNames.INDEX_STATUS)
-                put("arguments", buildJsonObject { })
-            }
+    fun testDispatchGetIndexStatus() = runBlocking {
+        val result = dispatcher.dispatch(
+            toolRegistry.getTool(ToolNames.INDEX_STATUS)!!,
+            buildJsonObject { }
         )
 
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNull("${ToolNames.INDEX_STATUS} should not return JSON-RPC error", response.error)
-        assertNotNull("${ToolNames.INDEX_STATUS} should return result", response.result)
+        assertFalse("${ToolNames.INDEX_STATUS} should not return an error result", result.isError == true)
+        assertTrue("${ToolNames.INDEX_STATUS} should return content", result.content.isNotEmpty())
     }
 
-    fun testToolsCallNonExistentTool() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(23),
-            method = "tools/call",
-            params = buildJsonObject {
-                put("name", "non_existent_tool")
-                put("arguments", buildJsonObject { })
-            }
+    fun testDispatchReportsErrorForInvalidProjectPath() = runBlocking {
+        val result = dispatcher.dispatch(
+            toolRegistry.getTool(ToolNames.INDEX_STATUS)!!,
+            buildJsonObject { put("project_path", "/non/existent/project/path") }
         )
 
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNotNull("Non-existent tool should return error", response.error)
-        assertEquals(-32601, response.error?.code)
-    }
-
-    fun testToolsCallMissingToolName() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(24),
-            method = "tools/call",
-            params = buildJsonObject {
-                put("arguments", buildJsonObject { })
-            }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNotNull("Missing tool name should return error", response.error)
-        assertEquals(-32602, response.error?.code)
-    }
-
-    // Error Handling Tests
-
-    fun testInvalidMethodReturnsError() = runBlocking {
-        val request = JsonRpcRequest(
-            id = JsonPrimitive(50),
-            method = "invalid/method",
-            params = buildJsonObject { }
-        )
-
-        val responseJson = handler.handleRequest(json.encodeToString(JsonRpcRequest.serializer(), request))
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNotNull("Invalid method should return error", response.error)
-        assertEquals(-32601, response.error?.code)
-    }
-
-    fun testMalformedJsonReturnsError() = runBlocking {
-        val responseJson = handler.handleRequest("{invalid json}")
-        val response = json.decodeFromString<JsonRpcResponse>(responseJson!!)
-
-        assertNotNull("Malformed JSON should return error", response.error)
-        assertEquals(-32700, response.error?.code)
+        assertTrue("Invalid project_path should yield an error result", result.isError == true)
     }
 }

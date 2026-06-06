@@ -1,6 +1,5 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.exceptions
 
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.JsonRpcErrorCodes
 import junit.framework.TestCase
 
 class McpExceptionsUnitTest : TestCase() {

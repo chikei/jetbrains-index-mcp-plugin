@@ -18,7 +18,8 @@ Create an MCP server within an IntelliJ plugin that allows AI coding assistants 
 - **Language**: Kotlin (JVM 21)
 - **Build System**: Gradle 9.0 with Kotlin DSL
 - **IDE Platform**: IntelliJ IDEA 2025.1+ (platformType = IC)
-- **HTTP Server**: Ktor CIO 2.3.12 (embedded, configurable port)
+- **HTTP Server**: Ktor CIO 3.4.3 (embedded, configurable port)
+- **MCP SDK**: Official Kotlin MCP SDK (`io.modelcontextprotocol:kotlin-sdk-jvm`) 0.13.0 — owns protocol, session management, and Ktor transports
 - **Protocol**: Model Context Protocol (MCP) 2025-03-26
 
 ## Key Documentation
@@ -58,12 +59,12 @@ src/
 │   │   │   └── rust/RustHandlers.kt    # Rust handlers (reflection)
 │   │   ├── server/                     # MCP server infrastructure
 │   │   │   ├── McpServerService.kt     # App-level service managing server lifecycle
-│   │   │   ├── JsonRpcHandler.kt       # JSON-RPC 2.0 request routing
+│   │   │   ├── McpServerFactory.kt     # buildServer(): constructs SDK Server, registers tools
+│   │   │   ├── McpToolDispatcher.kt    # Tool-call dispatch (project resolve + history + execute)
 │   │   │   ├── ProjectResolver.kt      # Multi-project resolution with workspace support
-│   │   │   ├── models/                 # Protocol models (JsonRpc, MCP)
+│   │   │   ├── models/                 # Tool-facing models (ToolDefinition, ToolCallResult, ContentBlock)
 │   │   │   └── transport/              # HTTP+SSE transport layer
-│   │   │       ├── KtorMcpServer.kt    # Embedded Ktor CIO server
-│   │   │       ├── KtorSseSessionManager.kt # SSE session management
+│   │   │       └── KtorMcpServer.kt    # Embedded Ktor CIO server wiring SDK transports
 │   │   ├── startup/                    # Startup activities
 │   │   ├── tools/                      # MCP tool implementations
 │   │   │   ├── McpTool.kt             # Tool interface
@@ -137,7 +138,7 @@ MCP servers expose:
 - **Prompts** - Pre-defined interaction templates (optional)
 
 **Server Infrastructure:**
-- Custom embedded **Ktor CIO** HTTP server (not IntelliJ's built-in server)
+- Embedded **Ktor CIO** HTTP server (not IntelliJ's built-in server) hosting the official Kotlin MCP SDK transports
 - Configurable port with IDE-specific defaults (e.g., IntelliJ: 29170, PyCharm: 29172) via Settings → Index MCP Server → Server Port
 - Binds to `127.0.0.1` only (localhost) for security
 - Single server instance across all open projects
@@ -145,20 +146,23 @@ MCP servers expose:
 
 **Key Server Classes:**
 - `McpServerService` - Application-level service managing server lifecycle
-- `KtorMcpServer` - Embedded Ktor CIO server with CORS support
-- `KtorSseSessionManager` - SSE session management using Kotlin channels
-- `JsonRpcHandler` - JSON-RPC 2.0 request processing
+- `KtorMcpServer` - Embedded Ktor CIO server wiring SDK transports (Streamable HTTP + legacy SSE); preserves localhost-only origin policy
+- `McpServerFactory.buildServer()` - Constructs the SDK `Server`, negotiates capabilities, and registers enabled tools (filtered by `McpSettings.isToolEnabled`)
+- `McpToolDispatcher` - Per-call dispatch: project resolution, command history, tool execution, result mapping (`ToolCallResult` → SDK `CallToolResult`)
 
-**Transport**: This plugin supports two transports with JSON-RPC 2.0:
+The SDK owns protocol handshake, `tools/list` / `tools/call` routing, and session management. Tool failures surface as `isError` tool results; the old custom JSON-RPC error codes (-32001..-32004) are gone.
+
+**Transport**: This plugin supports two SDK-provided transports:
 
 *Streamable HTTP (Primary, MCP 2025-03-26):*
 - `POST /index-mcp/streamable-http` → Stateless JSON-RPC requests/responses
 - `GET /index-mcp/streamable-http` → 405 Method Not Allowed
 - `DELETE /index-mcp/streamable-http` → 405 Method Not Allowed
+- `POST /index-mcp` → Stateless alias (backward compatibility)
 
 *Legacy SSE (MCP 2024-11-05):*
-- `GET /index-mcp/sse` → Opens SSE stream, sends `endpoint` event with POST URL
-- `POST /index-mcp` → JSON-RPC requests/responses
+- `GET /index-mcp/sse` → Opens SSE stream, advertises POST URL via the `endpoint` event
+- `POST /index-mcp/sse` → JSON-RPC messages, response sent over the stream
 
 **Client Configuration** (Cursor, Claude Desktop, etc.):
 ```json
@@ -312,12 +316,14 @@ Tests are split into two categories to optimize execution time:
 
 | Test Class | Base Class | Purpose |
 |------------|------------|---------|
-| `McpPluginUnitTest` | `TestCase` | JSON-RPC serialization, error codes, registry |
+| `McpPluginUnitTest` | `TestCase` | Tool registry |
 | `McpPluginTest` | `BasePlatformTestCase` | Platform availability |
 | `ToolsUnitTest` | `TestCase` | Tool schemas, registry, definitions |
 | `ToolsTest` | `BasePlatformTestCase` | Tool execution with project |
-| `JsonRpcHandlerUnitTest` | `TestCase` | JSON-RPC protocol, error handling |
-| `JsonRpcHandlerTest` | `BasePlatformTestCase` | Tool calls requiring project |
+| `ToolSchemaAdapterUnitTest` | `TestCase` | `toToolSchema()` schema adapter |
+| `McpToolDispatcherMappingUnitTest` | `TestCase` | `toCallToolResult()` result mapping |
+| `McpToolDispatcherHistoryFailureTest` | `BasePlatformTestCase` | Dispatch resilient to history failures |
+| `McpServerIntegrationTest` | `BasePlatformTestCase` | Tool registration + dispatch |
 | `CommandHistoryUnitTest` | `TestCase` | Data classes, filters |
 | `CommandHistoryServiceTest` | `BasePlatformTestCase` | Service with project |
 

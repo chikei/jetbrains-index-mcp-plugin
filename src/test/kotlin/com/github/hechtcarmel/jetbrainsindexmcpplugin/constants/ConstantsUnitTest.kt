@@ -83,16 +83,6 @@ class ConstantsUnitTest : TestCase() {
         assertEquals("ToolNames.ALL should be sorted alphabetically", sorted, ToolNames.ALL)
     }
 
-    // JsonRpcMethods tests
-
-    fun testJsonRpcMethodsValues() {
-        assertEquals("initialize", JsonRpcMethods.INITIALIZE)
-        assertEquals("notifications/initialized", JsonRpcMethods.NOTIFICATIONS_INITIALIZED)
-        assertEquals("ping", JsonRpcMethods.PING)
-        assertEquals("tools/list", JsonRpcMethods.TOOLS_LIST)
-        assertEquals("tools/call", JsonRpcMethods.TOOLS_CALL)
-    }
-
     // ParamNames tests
 
     fun testParamNamesCommon() {
@@ -167,13 +157,6 @@ class ConstantsUnitTest : TestCase() {
     fun testErrorMessagesProjectMessages() {
         assertTrue(ErrorMessages.MSG_NO_PROJECT_OPEN.contains("project"))
         assertTrue(ErrorMessages.MSG_MULTIPLE_PROJECTS.contains("project_path"))
-    }
-
-    fun testErrorMessagesJsonRpc() {
-        assertTrue(ErrorMessages.PARSE_ERROR.contains("parse") || ErrorMessages.PARSE_ERROR.contains("JSON"))
-        assertTrue(ErrorMessages.MISSING_PARAMS.contains("params"))
-        assertTrue(ErrorMessages.MISSING_TOOL_NAME.contains("tool"))
-        assertTrue(ErrorMessages.MISSING_RESOURCE_URI.contains("URI"))
     }
 
     fun testNoSymbolReferenceHandlerWithSupportedLanguages() {

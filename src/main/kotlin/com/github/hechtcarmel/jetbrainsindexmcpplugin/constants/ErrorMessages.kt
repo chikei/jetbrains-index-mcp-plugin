@@ -65,10 +65,5 @@ object ErrorMessages {
     fun resourceNotFound(uri: String) = "Resource not found: $uri"
     fun methodNotFound(method: String) = "Method not found: $method"
 
-    // JSON-RPC errors
-    const val PARSE_ERROR = "Failed to parse JSON-RPC request"
-    const val MISSING_PARAMS = "Missing params"
-    const val MISSING_TOOL_NAME = "Missing tool name"
-    const val MISSING_RESOURCE_URI = "Missing resource URI"
     const val UNKNOWN_ERROR = "Unknown error"
 }
