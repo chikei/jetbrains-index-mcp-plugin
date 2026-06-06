@@ -1,16 +1,13 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpConstants
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.JsonRpcHandler
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.ToolRegistry
 import io.ktor.http.HttpStatusCode
+import io.modelcontextprotocol.kotlin.sdk.server.Server
+import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
+import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import junit.framework.TestCase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.BufferedReader
@@ -21,23 +18,28 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 
+/**
+ * Integration tests for [KtorMcpServer] over the official Kotlin MCP SDK transports.
+ *
+ * These exercise the SDK-backed routing: stateless Streamable HTTP (primary + legacy alias),
+ * DNS-rebinding/origin protection, and the legacy SSE handshake. Protocol-level behavior
+ * (batching, error codes, session lifecycle) is owned by the SDK and is not re-asserted here.
+ *
+ * The server factory builds a bare SDK [Server] (no tools): `ping`/`initialize` are handled by
+ * the SDK itself, so transport wiring can be verified without the IntelliJ platform's settings
+ * service. Tool registration and dispatch are covered by their own tests.
+ */
 class KtorMcpServerUnitTest : TestCase() {
 
     private val httpClient = HttpClient.newHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
     private val mcpSessionIdHeader = "Mcp-Session-Id"
 
-    private lateinit var toolRegistry: ToolRegistry
-    private lateinit var coroutineScope: CoroutineScope
-    private lateinit var sseSessionManager: KtorSseSessionManager
     private lateinit var server: KtorMcpServer
     private var port: Int = 0
 
     override fun setUp() {
         super.setUp()
-        toolRegistry = ToolRegistry().also { it.registerBuiltInTools() }
-        coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        sseSessionManager = KtorSseSessionManager()
         port = findFreePort()
         server = createServer(port)
         assertEquals(KtorMcpServer.StartResult.Success, server.start())
@@ -45,7 +47,6 @@ class KtorMcpServerUnitTest : TestCase() {
 
     override fun tearDown() {
         server.stop()
-        coroutineScope.cancel()
         super.tearDown()
     }
 
@@ -85,97 +86,7 @@ class KtorMcpServerUnitTest : TestCase() {
         )
     }
 
-    fun testStreamableBatchRequestsReturnJsonArray() {
-        val response = sendRequest(
-            method = "POST",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = """
-                [
-                  {"jsonrpc":"2.0","id":1,"method":"ping"},
-                  {"jsonrpc":"2.0","id":2,"method":"ping"}
-                ]
-            """.trimIndent()
-        )
-
-        assertEquals(HttpStatusCode.OK.value, response.statusCode())
-
-        val responseArray = json.parseToJsonElement(response.body()).jsonArray
-        assertEquals(2, responseArray.size)
-        assertEquals("1", responseArray[0].jsonObject["id"]!!.jsonPrimitive.content)
-        assertEquals("2", responseArray[1].jsonObject["id"]!!.jsonPrimitive.content)
-    }
-
-    fun testStreamableScalarJsonReturnsInvalidRequestError() {
-        val response = sendRequest(
-            method = "POST",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = "1"
-        )
-
-        assertEquals(HttpStatusCode.BadRequest.value, response.statusCode())
-
-        val responseBody = json.parseToJsonElement(response.body()).jsonObject
-        assertEquals("-32600", responseBody["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
-    }
-
-    fun testStreamableInvalidNotificationReturnsInvalidRequestError() {
-        val response = sendRequest(
-            method = "POST",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = """{"jsonrpc":"2.0"}"""
-        )
-
-        assertEquals(HttpStatusCode.BadRequest.value, response.statusCode())
-
-        val responseBody = json.parseToJsonElement(response.body()).jsonObject
-        assertEquals("-32600", responseBody["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
-    }
-
-    fun testStreamableMixedBatchReturnsInvalidRequestError() {
-        val response = sendRequest(
-            method = "POST",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = """
-                [
-                  {"jsonrpc":"2.0","id":1,"method":"ping"},
-                  {"jsonrpc":"2.0","id":1,"result":{}}
-                ]
-            """.trimIndent()
-        )
-
-        assertEquals(HttpStatusCode.BadRequest.value, response.statusCode())
-
-        val responseBody = json.parseToJsonElement(response.body()).jsonObject
-        assertEquals("-32600", responseBody["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
-    }
-
-    fun testStreamableNotificationBatchReturnsAcceptedWithoutResponseBody() {
-        val response = sendRequest(
-            method = "POST",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = """
-                [
-                  {"jsonrpc":"2.0","method":"ping"},
-                  {"jsonrpc":"2.0","method":"notifications/initialized"}
-                ]
-            """.trimIndent()
-        )
-
-        assertEquals(HttpStatusCode.Accepted.value, response.statusCode())
-        assertTrue("Expected empty body for notification batch", response.body().isEmpty())
-    }
-
-    fun testStreamableDeleteReturnsMethodNotAllowedInStatelessMode() {
-        val response = sendRequest(
-            method = "DELETE",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH
-        )
-
-        assertEquals(HttpStatusCode.MethodNotAllowed.value, response.statusCode())
-        assertEquals("POST", response.headers().firstValue("allow").orElse(""))
-    }
-
-    fun testStreamableRequestSucceedsWithoutInitialize() {
+    fun testStreamablePingReturnsResult() {
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
@@ -187,6 +98,26 @@ class KtorMcpServerUnitTest : TestCase() {
         val responseBody = json.parseToJsonElement(response.body()).jsonObject
         assertEquals("1", responseBody["id"]!!.jsonPrimitive.content)
         assertNotNull(responseBody["result"])
+    }
+
+    fun testStreamableGetReturnsMethodNotAllowed() {
+        val response = sendRequest(
+            method = "GET",
+            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH
+        )
+
+        assertEquals(HttpStatusCode.MethodNotAllowed.value, response.statusCode())
+        assertEquals("POST", response.headers().firstValue("allow").orElse(""))
+    }
+
+    fun testStreamableDeleteReturnsMethodNotAllowedInStatelessMode() {
+        val response = sendRequest(
+            method = "DELETE",
+            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH
+        )
+
+        assertEquals(HttpStatusCode.MethodNotAllowed.value, response.statusCode())
+        assertEquals("POST", response.headers().firstValue("allow").orElse(""))
     }
 
     fun testRejectsNonLocalOrigin() {
@@ -223,12 +154,12 @@ class KtorMcpServerUnitTest : TestCase() {
             val endpointEvent = readSseEvent(reader)
             assertEquals("endpoint", endpointEvent.eventType())
 
-            val endpointPath = endpointEvent.data()
-            assertTrue(endpointPath.startsWith("${McpConstants.MCP_ENDPOINT_PATH}?${McpConstants.SESSION_ID_PARAM}="))
+            val sessionId = endpointEvent.data().substringAfter("sessionId=")
+            assertTrue("Expected sessionId in endpoint event", sessionId.isNotBlank())
 
             val postResponse = sendRequest(
                 method = "POST",
-                path = endpointPath,
+                path = "${McpConstants.SSE_ENDPOINT_PATH}?${McpConstants.SESSION_ID_PARAM}=$sessionId",
                 body = """{"jsonrpc":"2.0","id":1,"method":"ping"}"""
             )
 
@@ -262,9 +193,12 @@ class KtorMcpServerUnitTest : TestCase() {
     private fun createServer(port: Int): KtorMcpServer {
         return KtorMcpServer(
             port = port,
-            jsonRpcHandler = JsonRpcHandler(toolRegistry),
-            sseSessionManager = sseSessionManager,
-            coroutineScope = coroutineScope
+            serverFactory = {
+                Server(
+                    serverInfo = Implementation(name = "test-server", version = "1.0.0"),
+                    options = ServerOptions(capabilities = ServerCapabilities()),
+                )
+            }
         )
     }
 
@@ -329,10 +263,10 @@ class KtorMcpServerUnitTest : TestCase() {
         return lines
     }
 
-    private fun List<String>.eventType(): String = first { it.startsWith("event: ") }.substringAfter("event: ")
+    private fun List<String>.eventType(): String = first { it.startsWith("event:") }.substringAfter("event:").trim()
 
-    private fun List<String>.data(): String = filter { it.startsWith("data: ") }
-        .joinToString("\n") { it.substringAfter("data: ") }
+    private fun List<String>.data(): String = filter { it.startsWith("data:") }
+        .joinToString("\n") { it.substringAfter("data:").trim() }
 
     private fun initializeRequestBody(protocolVersion: String) = """
         {
@@ -344,7 +278,8 @@ class KtorMcpServerUnitTest : TestCase() {
             "clientInfo": {
               "name": "test-client",
               "version": "1.0.0"
-            }
+            },
+            "capabilities": {}
           }
         }
     """.trimIndent()

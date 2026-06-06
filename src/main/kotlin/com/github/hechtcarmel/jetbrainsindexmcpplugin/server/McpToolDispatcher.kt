@@ -8,11 +8,15 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.history.CommandStatus
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ContentBlock
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.McpTool
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -23,7 +27,18 @@ class McpToolDispatcher {
         private val LOG = logger<McpToolDispatcher>()
     }
 
-    suspend fun dispatch(tool: McpTool, arguments: JsonObject): CallToolResult {
+    /**
+     * Dispatches a tool call within an IDE modality context so tools that rely on the ambient
+     * [ModalityState] (read actions, `invokeLater` without an explicit modality) behave correctly
+     * regardless of which transport coroutine the SDK runs the call on.
+     *
+     * The dispatch logic lives in [dispatchInternal] so it can be exercised in tests without an
+     * IDE application present.
+     */
+    suspend fun dispatch(tool: McpTool, arguments: JsonObject): CallToolResult =
+        withIdeModality { dispatchInternal(tool, arguments) }
+
+    internal suspend fun dispatchInternal(tool: McpTool, arguments: JsonObject): CallToolResult {
         val projectPath = arguments[ParamNames.PROJECT_PATH]?.jsonPrimitive?.contentOrNull
 
         val projectResult = ProjectResolver.resolve(projectPath)
@@ -94,6 +109,11 @@ class McpToolDispatcher {
         } catch (e: Exception) {
             LOG.warn("Failed to update command history for ${commandEntry.toolName}", e)
         }
+    }
+
+    private suspend fun <T> withIdeModality(block: suspend () -> T): T {
+        val application = ApplicationManager.getApplication() ?: return block()
+        return withContext(ModalityState.any().asContextElement()) { block() }
     }
 }
 

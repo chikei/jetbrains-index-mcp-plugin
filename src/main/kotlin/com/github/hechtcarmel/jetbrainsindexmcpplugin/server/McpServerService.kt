@@ -4,7 +4,6 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpBundle
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpConstants
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.ServerStatusListener
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport.KtorMcpServer
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport.KtorSseSessionManager
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettings
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettingsConfigurable
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.ToolRegistry
@@ -29,11 +28,10 @@ import kotlinx.coroutines.launch
  * This service manages:
  * - Embedded Ktor CIO server with configurable port
  * - Tool registry for MCP tools
- * - JSON-RPC handler for message processing
- * - SSE session management for client connections
+ * - Tool dispatcher bridging MCP tool calls to project resolution and execution
  * - Coroutine scope for non-blocking tool execution
  *
- * Uses HTTP+SSE transport for compatibility with MCP clients.
+ * Protocol handling, session management, and transport are provided by the official Kotlin MCP SDK.
  */
 @Service(Service.Level.APP)
 class McpServerService(
@@ -41,8 +39,7 @@ class McpServerService(
 ) : Disposable {
 
     private val toolRegistry: ToolRegistry = ToolRegistry()
-    private val jsonRpcHandler: JsonRpcHandler
-    private val sseSessionManager: KtorSseSessionManager = KtorSseSessionManager()
+    private val dispatcher: McpToolDispatcher = McpToolDispatcher()
     private var ktorServer: KtorMcpServer? = null
     private var serverError: ServerError? = null
 
@@ -66,7 +63,6 @@ class McpServerService(
 
     init {
         LOG.info("Initializing MCP Server Service (Protocol: ${McpConstants.MCP_PROTOCOL_VERSION})")
-        jsonRpcHandler = JsonRpcHandler(toolRegistry)
         // Self-initialize asynchronously so the server starts even if postStartupActivity
         // doesn't fire (see issue #73). initialize() is idempotent (@Synchronized + isInitialized
         // guard), so the redundant call from McpServerStartupActivity is a safe no-op.
@@ -106,9 +102,7 @@ class McpServerService(
         val server = KtorMcpServer(
             port = port,
             host = host,
-            jsonRpcHandler = jsonRpcHandler,
-            sseSessionManager = sseSessionManager,
-            coroutineScope = coroutineScope
+            serverFactory = { buildServer(toolRegistry, dispatcher) }
         )
 
         val result = when (val startResult = server.start()) {
@@ -185,10 +179,6 @@ class McpServerService(
     fun getServerError(): ServerError? = serverError
 
     fun getToolRegistry(): ToolRegistry = toolRegistry
-
-    fun getJsonRpcHandler(): JsonRpcHandler = jsonRpcHandler
-
-    fun getSseSessionManager(): KtorSseSessionManager = sseSessionManager
 
     /**
      * Returns the Streamable HTTP endpoint URL for MCP connections (primary transport).
@@ -269,7 +259,6 @@ class McpServerService(
     override fun dispose() {
         LOG.info("Disposing MCP Server Service")
         stopServer()
-        sseSessionManager.closeAllSessions()
     }
 }
 
