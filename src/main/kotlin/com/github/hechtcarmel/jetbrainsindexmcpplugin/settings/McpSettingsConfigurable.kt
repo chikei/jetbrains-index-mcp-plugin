@@ -208,6 +208,7 @@ class McpSettingsConfigurable : Configurable {
         val settings = McpSettings.getInstance()
         val oldHost = settings.serverHost
         val oldPort = settings.serverPort
+        val oldDisabledTools = settings.disabledTools
         val newHost = serverHostField?.text?.trim() ?: McpConstants.DEFAULT_SERVER_HOST
         val newPort = serverPortSpinner?.value as? Int ?: McpConstants.getDefaultServerPort()
 
@@ -251,9 +252,12 @@ class McpSettingsConfigurable : Configurable {
             }
         }
         settings.disabledTools = disabledTools
+        val toolsChanged = disabledTools != oldDisabledTools
 
-        // Auto-restart server if host/port changed
-        if (newHost != oldHost || newPort != oldPort) {
+        // Auto-restart server if host/port changed or the enabled-tool set changed.
+        // buildServer() reads the enabled tools per session, so a restart drops live
+        // sessions and forces clients to reconnect against the updated tool list.
+        if (newHost != oldHost || newPort != oldPort || toolsChanged) {
             ApplicationManager.getApplication().invokeLater({
                 val mcpService = McpServerService.getInstance()
                 if (!mcpService.isInitialized) return@invokeLater
