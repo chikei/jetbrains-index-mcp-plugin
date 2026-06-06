@@ -43,6 +43,23 @@ class McpToolDispatcherMappingUnitTest : TestCase() {
         assertEquals(true, result.isError)
     }
 
+    fun testMapsEmptyContentToEmptyList() {
+        val result = toCallToolResult(
+            ToolCallResult(content = emptyList())
+        )
+
+        assertTrue("Empty content should map to an empty list", result.content.isEmpty())
+        assertEquals(false, result.isError)
+    }
+
+    fun testDefaultsIsErrorToFalse() {
+        val result = toCallToolResult(
+            ToolCallResult(content = listOf(ContentBlock.Text("ok")))
+        )
+
+        assertEquals("isError should default to false when unset", false, result.isError)
+    }
+
     fun testMapsMultipleBlocksInOrder() {
         val result = toCallToolResult(
             ToolCallResult(

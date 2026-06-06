@@ -58,6 +58,29 @@ class ToolSchemaAdapterUnitTest : TestCase() {
         assertEquals(emptyList<String>(), toolSchema.required)
     }
 
+    fun testEmptyRequiredArrayYieldsEmptyList() {
+        val schema = buildJsonObject {
+            put("type", "object")
+            putJsonArray("required") {}
+        }
+
+        val toolSchema = toToolSchema(schema)
+
+        assertEquals(emptyList<String>(), toolSchema.required)
+    }
+
+    fun testEmptyPropertiesObjectIsPreservedNonNull() {
+        val schema = buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {}
+        }
+
+        val toolSchema = toToolSchema(schema)
+
+        assertNotNull("Empty properties object should be preserved, not nulled", toolSchema.properties)
+        assertTrue("Properties should be empty", toolSchema.properties!!.isEmpty())
+    }
+
     fun testMultipleRequiredPreservedInOrder() {
         val schema = buildJsonObject {
             put("type", "object")

@@ -57,13 +57,5 @@ object ErrorMessages {
     fun msgProjectNotFound(path: String) = "No open project matches the specified path: $path"
     const val MSG_MULTIPLE_PROJECTS = "Multiple projects are open. Please specify 'project_path' parameter with one of the available project paths. For workspace projects, use the sub-project path."
 
-    // Index errors
-    const val INDEX_NOT_READY = "IDE is in dumb mode, indexes not available"
-
-    // Tool/method errors
-    fun toolNotFound(name: String) = "Tool not found: $name"
-    fun resourceNotFound(uri: String) = "Resource not found: $uri"
-    fun methodNotFound(method: String) = "Method not found: $method"
-
     const val UNKNOWN_ERROR = "Unknown error"
 }
