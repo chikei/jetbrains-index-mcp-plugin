@@ -11,6 +11,7 @@
 - Removed the custom JSON-RPC error codes (-32001..-32004) in favor of standard SDK error handling; tool failures now surface as `isError` tool results.
 
 ### Fixed
+- Fixed the Settings tool list staying stuck on "Server is initializing..." when the panel was opened before the server's asynchronous startup completed. The settings panel now subscribes to server status changes and rebuilds the tool list once the server is ready.
 - Fixed `ide_file_structure` for Lombok/augmented Java classes by skipping generated PSI members without real source offsets. Fixes [#201](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/201).
 
 ## [4.19.1] - 2026-05-26

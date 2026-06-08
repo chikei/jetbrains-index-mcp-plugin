@@ -67,6 +67,6 @@ object McpConstants {
 /**
  * Listener interface for server status changes.
  */
-interface ServerStatusListener {
+fun interface ServerStatusListener {
     fun serverStatusChanged()
 }

@@ -2,6 +2,7 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.settings
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpBundle
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpConstants
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.ServerStatusListener
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport.KtorMcpServer
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.McpServerService
 import com.intellij.icons.AllIcons
@@ -51,6 +52,7 @@ class McpSettingsConfigurable : Configurable {
     private var availableProjectsModeComboBox: ComboBox<McpSettings.AvailableProjectsMode>? = null
     private var responseFormatComboBox: ComboBox<McpSettings.ResponseFormat>? = null
     private val toolCheckBoxes = mutableMapOf<String, JBCheckBox>()
+    private var toolsContainer: JPanel? = null
     private var uiDisposable: Disposable? = null
 
     private var lastHostValidation: ValidationInfo? = null
@@ -148,31 +150,52 @@ class McpSettingsConfigurable : Configurable {
     }
 
     private fun createToolsPanel(): JComponent {
-        val toolsContainer = JPanel().apply {
+        val container = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
         }
+        toolsContainer = container
+
+        // The server initializes asynchronously, so the tool registry may not be populated
+        // when this panel is first built. Subscribe before populating so we never miss the
+        // status change that fills in the tool list.
+        subscribeToServerStatus()
+        populateToolsPanel()
+
+        return container
+    }
+
+    private fun populateToolsPanel() {
+        val container = toolsContainer ?: return
+        container.removeAll()
+        toolCheckBoxes.clear()
 
         val mcpService = McpServerService.getInstance()
         if (!mcpService.isInitialized) {
-            toolsContainer.add(JBLabel("Server is initializing...").apply {
+            container.add(JBLabel(McpBundle.message("settings.tools.initializing")).apply {
                 foreground = JBColor(0xD9A343, 0xD9A343)
             })
-            return toolsContainer
-        }
-
-        val toolRegistry = mcpService.getToolRegistry()
-        val allTools = toolRegistry.getAllToolDefinitions().sortedBy { it.name }
-        val settings = McpSettings.getInstance()
-
-        for (tool in allTools) {
-            val checkbox = JBCheckBox(tool.name, settings.isToolEnabled(tool.name)).apply {
-                toolTipText = tool.description
+        } else {
+            val allTools = mcpService.getToolRegistry().getAllToolDefinitions().sortedBy { it.name }
+            val settings = McpSettings.getInstance()
+            for (tool in allTools) {
+                val checkbox = JBCheckBox(tool.name, settings.isToolEnabled(tool.name)).apply {
+                    toolTipText = tool.description
+                }
+                toolCheckBoxes[tool.name] = checkbox
+                container.add(checkbox)
             }
-            toolCheckBoxes[tool.name] = checkbox
-            toolsContainer.add(checkbox)
         }
 
-        return toolsContainer
+        container.revalidate()
+        container.repaint()
+    }
+
+    private fun subscribeToServerStatus() {
+        val disposable = uiDisposable ?: return
+        val connection = ApplicationManager.getApplication().messageBus.connect(disposable)
+        connection.subscribe(McpConstants.SERVER_STATUS_TOPIC, ServerStatusListener {
+            ApplicationManager.getApplication().invokeLater({ populateToolsPanel() }, ModalityState.any())
+        })
     }
 
     override fun isModified(): Boolean {
@@ -432,6 +455,7 @@ class McpSettingsConfigurable : Configurable {
         availableProjectsModeComboBox = null
         responseFormatComboBox = null
         toolCheckBoxes.clear()
+        toolsContainer = null
         uiDisposable?.let { Disposer.dispose(it) }
         uiDisposable = null
     }
