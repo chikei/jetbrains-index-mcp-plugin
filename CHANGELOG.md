@@ -7,6 +7,9 @@
 - Migrated the MCP server to the official Kotlin MCP SDK (`io.modelcontextprotocol:kotlin-sdk-jvm` 0.13.0); the SDK now owns the protocol handshake, `tools/list` / `tools/call` routing, and session management. Upgraded embedded Ktor 2.3.12 → 3.4.3.
 - The legacy SSE transport POST path moved from `/index-mcp` to `/index-mcp/sse`; the SDK's SSE transport advertises the correct URL via the `endpoint` event, so spec-compliant clients keep working. The Streamable HTTP path (`/index-mcp/streamable-http`) and the stateless `POST /index-mcp` alias are unchanged.
 
+### Added
+- CORS support for browser-based MCP clients, locked to the same localhost origins (`localhost`, `127.0.0.1`, `[::1]`) enforced by DNS-rebinding protection. Exposes the `Mcp-Session-Id` and `Mcp-Protocol-Version` headers.
+
 ### Removed
 - Removed the custom JSON-RPC error codes (-32001..-32004) in favor of standard SDK error handling; tool failures now surface as `isError` tool results.
 

@@ -4,6 +4,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpConstants
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.logger
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -14,6 +15,7 @@ import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.delete
@@ -60,6 +62,13 @@ class KtorMcpServer(
 
         /** Localhost origins accepted by DNS-rebinding protection (hostname-compared). */
         private val LOCALHOST_ORIGINS = listOf("http://localhost", "http://127.0.0.1", "http://[::1]")
+
+        /** Same localhost origins for the CORS plugin: host → allowed schemes. */
+        private val CORS_HOSTS = listOf(
+            "localhost" to listOf("http"),
+            "127.0.0.1" to listOf("http"),
+            "[::1]" to listOf("http"),
+        )
     }
 
     /**
@@ -125,6 +134,20 @@ class KtorMcpServer(
     private fun Application.configureRouting() {
         install(SSE)
         install(ContentNegotiation) { json(McpJson) }
+        // CORS for browser-based MCP clients. Locked to the same localhost origins enforced by
+        // DnsRebindingProtection below — no anyHost().
+        install(CORS) {
+            CORS_HOSTS.forEach { (host, schemes) -> allowHost(host, schemes = schemes) }
+            allowMethod(HttpMethod.Options)
+            allowMethod(HttpMethod.Get)
+            allowMethod(HttpMethod.Post)
+            allowMethod(HttpMethod.Delete)
+            allowNonSimpleContentTypes = true
+            allowHeader("Mcp-Session-Id")
+            allowHeader("Mcp-Protocol-Version")
+            exposeHeader("Mcp-Session-Id")
+            exposeHeader("Mcp-Protocol-Version")
+        }
 
         routing {
             // All transports live under /index-mcp; DNS-rebinding protection is installed once
