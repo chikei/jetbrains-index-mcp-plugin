@@ -24,13 +24,13 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
-import io.modelcontextprotocol.kotlin.sdk.server.DnsRebindingProtection
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.StreamableHttpServerTransport
 import io.modelcontextprotocol.kotlin.sdk.server.mcp
 import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import kotlinx.coroutines.CancellationException
 import java.net.BindException
+import java.net.URI
 
 /**
  * Embedded Ktor CIO server hosting the MCP protocol via the official Kotlin MCP SDK transports.
@@ -60,8 +60,8 @@ class KtorMcpServer(
     companion object {
         private val LOG = logger<KtorMcpServer>()
 
-        /** Localhost origins accepted by DNS-rebinding protection (hostname-compared). */
-        private val LOCALHOST_ORIGINS = listOf("http://localhost", "http://127.0.0.1", "http://[::1]")
+        /** Localhost hostnames accepted by DNS-rebinding protection (port/scheme ignored). */
+        private val LOCALHOST_HOSTS = setOf("localhost", "127.0.0.1", "[::1]", "::1")
 
         /** Same localhost origins for the CORS plugin: host → allowed schemes. */
         private val CORS_HOSTS = listOf(
@@ -150,12 +150,10 @@ class KtorMcpServer(
         }
 
         routing {
-            // All transports live under /index-mcp; DNS-rebinding protection is installed once
-            // on the parent route and inherited by every child (installing it twice on an
-            // overlapping route node throws a duplicate-plugin exception).
+            // All transports live under /index-mcp. Origin protection is enforced in
+            // handleStreamableHttp (the 0.10.0 SDK has no route-level DnsRebindingProtection
+            // plugin); the CORS plugin above plus localhost-only binding cover the rest.
             route(McpConstants.MCP_ENDPOINT_PATH) {
-                install(DnsRebindingProtection) { allowedOrigins = LOCALHOST_ORIGINS }
-
                 // === Streamable HTTP Transport (2025-03-26 spec) ===
                 route("/streamable-http") {
                     post { handleStreamableHttp(call) }
@@ -168,9 +166,8 @@ class KtorMcpServer(
 
                 // === Legacy SSE Transport (2024-11-05 spec) ===
                 // The SDK owns the session lifecycle and advertises its POST URL via the
-                // `endpoint` event. DNS-rebinding protection is disabled here because the parent
-                // route already installs it.
-                mcp(path = "/sse", enableDnsRebindingProtection = false) {
+                // `endpoint` event.
+                mcp(path = "/sse") {
                     serverFactory()
                 }
             }
@@ -180,8 +177,19 @@ class KtorMcpServer(
     /**
      * Handles a stateless Streamable HTTP POST request by bridging it to an SDK
      * [StreamableHttpServerTransport]. Mirrors the SDK's private stateless endpoint.
+     *
+     * Origin protection is enforced here rather than via the SDK's built-in DNS-rebinding
+     * guard: the 0.10.0 transport compares the full Origin string (scheme + host + port) and
+     * rejects requests with no Origin header, which blocks legitimate non-browser clients and
+     * loopback origins on non-default ports. We compare hostnames only and allow a missing
+     * Origin (non-browser callers), matching the localhost-only binding policy.
      */
     private suspend fun handleStreamableHttp(call: ApplicationCall) {
+        if (!isOriginAllowed(call.request.headers[HttpHeaders.Origin])) {
+            call.respond(HttpStatusCode.Forbidden)
+            return
+        }
+
         val transport = StreamableHttpServerTransport(
             StreamableHttpServerTransport.Configuration(enableJsonResponse = true)
         ).also { it.setSessionIdGenerator(null) }
@@ -190,6 +198,13 @@ class KtorMcpServer(
         mcpServer.createSession(transport)
 
         transport.handleRequest(null, call)
+    }
+
+    /** Allows a missing Origin (non-browser clients) or any localhost hostname, port-agnostic. */
+    private fun isOriginAllowed(origin: String?): Boolean {
+        if (origin == null) return true
+        val host = runCatching { URI(origin).host }.getOrNull() ?: return false
+        return host.lowercase() in LOCALHOST_HOSTS
     }
 
     private suspend fun respondMethodNotAllowed(call: ApplicationCall) {
